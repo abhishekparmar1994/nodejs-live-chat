@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Chat</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/emoji-mart/css/emoji-mart.css">
+  <script src="https://cdn.jsdelivr.net/npm/emoji-mart/dist/browser.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      justify-content: space-between;
+      height: 100vh;
+      background-color: #f4f4f9;
+    }
+    .sidebar {
+      width: 200px;
+      background: #ffffff;
+      border-right: 1px solid #ddd;
+      padding: 20px;
+      box-shadow: 2px 0px 10px rgba(0, 0, 0, 0.1);
+    }
+    .chat-container {
+      width: calc(100% - 200px);
+      background: #ffffff;
+      border-radius: 8px;
+      box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0077cc;
+      color: #ffffff;
+      padding: 15px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    .chat-body {
+      height: 300px;
+      overflow-y: auto;
+      padding: 10px;
+      border-bottom: 1px solid #ddd;
+    }
+    .chat-footer {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: #f9f9f9;
+      position: relative;
+    }
+    #message {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      outline: none;
+    }
+    #send, #emoji-button, #file-button {
+      margin-left: 4px;
+      margin-right: 8px;
+      padding: 10px;
+      border: none;
+      background: #0077cc;
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    #send:hover, #emoji-button:hover, #file-button:hover {
+      background: #005fa3;
+    }
+    .emoji-picker {
+      position: absolute;
+      bottom: 50px;
+      left: 10px;
+      display: none;
+      z-index: 1000;
+    }
+    .user-list {
+      list-style: none;
+      padding: 0;
+    }
+    .user-list li {
+      padding: 8px;
+      background: #f4f4f9;
+      margin-bottom: 5px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+    }
+    .user-list li .online-status {
+      width: 12px;
+      height: 12px;
+      background-color: #21d345;
+      border-radius: 50%;
+      margin-left: 10px;
+    }
+    .typing-indicator {
+      color: #0077cc;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    .gif-search-container {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: #f9f9f9;
+    }
+    .gif-search-container input {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      outline: none;
+    }
+    .gif-search-container button {
+      margin-left: 4px;
+      padding: 10px;
+      border: none;
+      background: #0077cc;
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .gif-search-container button:hover {
+      background: #005fa3;
+    }
+    .gif-results {
+      display: flex;
+      flex-wrap: wrap;
+      padding: 10px;
+      background: #f9f9f9;
+    }
+    .gif-results img {
+      width: 100px;
+      height: 100px;
+      margin: 5px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <h3>Online Users</h3>
+    <ul id="user-list" class="user-list"></ul>
+  </div>
+
+  <div class="chat-container">
+    <div class="chat-header">Live Chat</div>
+    <div id="chat" class="chat-body"></div>
+    <div id="typing-indicator" class="typing-indicator"></div>  <!-- Typing indicator -->
+    
+    <div class="chat-footer">
+      <button id="emoji-button">😊</button>
+      <input type="file" id="file-input" style="display: none;">
+      <button id="file-button">📎</button>
+      <button id="gif-button">GIF</button>
+      <div id="gif-search-container" class="gif-search-container" style="display: none; margin-right: ;">
+        <input type="text" id="gif-search-input" placeholder="Search GIFs...">
+        <button id="gif-search-button">Search</button>
+      </div>
+      <div id="gif-results" class="gif-results" style="display: none;"></div>
+      <input type="text" id="message" placeholder="Type a message...">
+      <button id="send">Send</button>
+      <div id="emoji-picker" class="emoji-picker"></div>
+      
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+
+    const chat = document.getElementById('chat');
+    const messageInput = document.getElementById('message');
+    const sendButton = document.getElementById('send');
+    const emojiButton = document.getElementById('emoji-button');
+    const emojiPickerContainer = document.getElementById('emoji-picker');
+    const fileInput = document.getElementById('file-input');
+    const fileButton = document.getElementById('file-button');
+    const userList = document.getElementById('user-list');
+    const typingIndicator = document.getElementById('typing-indicator');  // Typing indicator element
+    const gifButton = document.getElementById('gif-button');
+    const gifSearchContainer = document.getElementById('gif-search-container');
+    const gifSearchInput = document.getElementById('gif-search-input');
+    const gifSearchButton = document.getElementById('gif-search-button');
+    const gifResults = document.getElementById('gif-results');
+
+    let userName = localStorage.getItem('userName') || prompt('Enter your name:') || 'Anonymous';
+    localStorage.setItem('userName', userName);
+
+    // Emit the username to the server
+    socket.emit('setUserName', userName);
+
+    // Authentication
+    const token = localStorage.getItem('token');
+    if (!token) {
+      window.location.href = '/login.html'; // Redirect to login page if not authenticated
+    }
+
+    // Fetch and display the list of online users
+    fetch('/api/online-users', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    .then(response => response.json())
+    .then(users => {
+      updateUserList(users);
+    });
+
+    if (window.location.protocol === 'https:' || window.location.hostname === 'localhost') {
+        if (Notification.permission !== 'granted') {
+            Notification.requestPermission();
+        }
+    } else {
+        console.log("Notifications can only be requested in a secure context (HTTPS or localhost).");
+    }
+        
+
+
+    // Listen for a new message event and display a window notification
+    socket.on('newMessage', (message) => {
+        // Assuming `message` contains `content` and `sender` (the sender's name)
+        const sender = message.sender; 
+        const content = message.content;
+
+        // Create and show the notification if permission is granted
+        if (Notification.permission === 'granted') {
+            new Notification(`New message from ${sender}`, {
+                body: content, // The content of the message
+                icon: '/path/to/icon.png', // Optional: Add an icon (replace with actual path)
+            });
+        }
+    });
+
+
+    function appendMessage({ name, message, image, gifUrl }, isSender) {
+      const messageElement = document.createElement('div');
+      messageElement.classList.add('message', isSender ? 'sender' : 'receiver');
+      messageElement.innerHTML = `<strong>${name}:</strong> ${message || ''}`;
+      if (image) {
+        const img = document.createElement('img');
+        img.src = image;
+        img.style.maxWidth = '100px';
+        img.style.display = 'block';
+        messageElement.appendChild(img);
+      }
+      if (gifUrl) {
+        const img = document.createElement('img');
+        img.src = gifUrl;
+        img.style.maxWidth = '100px';
+        img.style.display = 'block';
+        messageElement.appendChild(img);
+      }
+      chat.appendChild(messageElement);
+      chat.scrollTop = chat.scrollHeight;
+
+        let title = "New Message";  
+
+        let icon = 'https://homepages.cae.wisc.edu/~ece533/images/airplane.png';
+
+        let body = name + ": " + message;
+        
+
+        new Notification(title, { body, icon });
+
+      // Store message in database
+      fetch('/api/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ name, message, image, gifUrl })
+      });
+    }
+
+    // Display the list of online users in the sidebar
+    function updateUserList(users) {
+      userList.innerHTML = ''; // Clear the existing list
+      users.forEach(user => {
+        const userElement = document.createElement('li');
+        userElement.textContent = user;
+        userElement.setAttribute('data-socket-id', user.socketId);
+
+        // Add the blue tick next to the user's name
+        const statusIndicator = document.createElement('span');
+        statusIndicator.classList.add('online-status');
+        userElement.appendChild(statusIndicator);
+
+        userList.appendChild(userElement);
+      });
+    }
+
+    sendButton.addEventListener('click', () => {
+      const message = messageInput.value;
+      if (message.trim()) {
+        socket.emit('chatMessage', { name: userName, message });
+        appendMessage({ name: "You", message }, true);
+        messageInput.value = '';
+      }
+    });
+
+    fileButton.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (file && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          socket.emit('chatMessage', { name: userName, image: reader.result });
+          appendMessage({ name: "You", image: reader.result }, true);
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+
+    let typingTimeout;
+    messageInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendButton.click();
+      socket.emit('typing', userName); // Emit typing event to the server
+
+        // Optionally, you can set a timeout to stop emitting after a small delay to prevent excessive traffic.
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+            socket.emit('typing', ''); // Send empty typing event after a brief pause to stop typing indicator
+        }, 1000);
+    });
+
+    socket.on('chatMessage', (data) => {
+      if (data.name !== userName) appendMessage(data, false);
+    });
+
+    socket.on('onlineUsers', (users) => {
+      updateUserList(users); // Update the sidebar with the latest online users
+    });
+
+    socket.on('userTyping', (userName) => {
+        if (userName) {
+            typingIndicator.innerText = `${userName} is typing...`;  // Show typing indicator
+        } else {
+            typingIndicator.innerText = ''; // Hide typing indicator when no one is typing
+        }
+        setTimeout(() => typingIndicator.innerText = '', 2000);  // Hide typing indicator after 2 seconds
+        console.log(userName);
+    });
+
+    const picker = new EmojiMart.Picker({
+/**
+ * Handles the event when an emoji is selected from the emoji picker.
+ * Appends the native emoji character to the message input field.
+ * 
+ * @param {Object} emoji - The emoji object selected by the user.
+ * @param {string} emoji.native - The native emoji character.
+ */
+
+      onEmojiSelect(emoji) {
+        messageInput.value += emoji.native;
+      }
+    });
+    emojiPickerContainer.appendChild(picker);
+
+    emojiButton.addEventListener('click', () => {
+      emojiPickerContainer.style.display = emojiPickerContainer.style.display === 'none' ? 'block' : 'none';
+    });
+
+    gifButton.addEventListener('click', () => {
+      gifSearchContainer.style.display = gifSearchContainer.style.display === 'none' ? 'flex' : 'none';
+    });
+
+    gifSearchButton.addEventListener('click', () => {
+      const query = gifSearchInput.value;
+      if (query.trim()) {
+        fetch(`/api/search-gifs?q=${query}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+        .then(response => response.json())
+        .then(gifs => {
+          gifResults.innerHTML = '';
+          gifs.forEach(gif => {
+            const img = document.createElement('img');
+            img.src = gif.images.fixed_height.url;
+            img.addEventListener('click', () => {
+              socket.emit('gifMessage', { name: userName, gifUrl: gif.images.fixed_height.url });
+              appendMessage({ name: "You", gifUrl: gif.images.fixed_height.url }, true);
+              gifResults.innerHTML = '';
+              gifSearchContainer.style.display = 'none';
+            });
+            gifResults.appendChild(img);
+          });
+          gifResults.style.display = 'flex';
+        });
+      }
+    });
+
+    socket.on('gifMessage', (data) => {
+      if (data.name !== userName) appendMessage(data, false);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Disconnected');
+    });
+
+// Send a message with sender info
+    sendButton.addEventListener('click', () => {
+        const message = messageInput.value;
+        const sender = userName;
+        socket.emit('sendMessage', { sender, content: message }); // Emit message data to server
+    });
+
+    // Load previous messages from database
+    fetch('/api/messages', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    .then(response => response.json())
+    .then(messages => {
+      messages.forEach(message => appendMessage(message, message.name === userName));
+    });
+
+  </script>
+</body>
+</html>
