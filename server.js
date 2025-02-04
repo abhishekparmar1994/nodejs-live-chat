@@ -132,7 +132,7 @@ app.get('/api/search-gifs', authenticateToken, (req, res) => {
   const query = req.query.q;
 
   console.log('query'+query);
-  const apiKey = 'LCf4OpkWro3TIcRuFl4HeMwa0vA4HNOC'; // Replace with your Giphy API key
+  const apiKey = 'enter valid key'; // Replace with your Giphy API key
   const url = `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${query}&limit=10`;
 
   fetch(url)
